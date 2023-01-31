@@ -1,9 +1,12 @@
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
+mod RESP;
 mod command;
+mod resp;
 
 #[tokio::main]
+
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind("127.0.0.1:6380").await?;
 
@@ -26,8 +29,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
 
                 // Parse the command from RESP into
-                let cmd = command::COMMAND::from_bytes(n);
-                println!("{:#?}", cmd);
+                // let cmd = command::command::COMMAND::from_bytes(&buf[0..n]);
+                let resp_array = resp::resp::RESP::array_from_bytes(&buf[..n]);
+
+                println!("{:#?}", resp_array);
 
                 // Write the data back
                 if let Err(e) = socket.write_all(&buf[0..n]).await {
