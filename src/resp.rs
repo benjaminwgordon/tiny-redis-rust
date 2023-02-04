@@ -38,6 +38,7 @@ pub mod resp {
             let array_len = array_len_as_str.parse::<usize>();
             match array_len {
                 Err(err) => {
+                    println!("{}", err);
                     return Err(RespParseError::from_parse_int_error(err));
                 }
                 Ok(val) => return Ok(val),
@@ -50,10 +51,21 @@ pub mod resp {
             end: usize,
         ) -> Result<String, RespParseError> {
             let content = std::str::from_utf8(&bytes[start..end]);
+
             match content {
                 Err(err) => return Err(RespParseError::from_utf8_error(err)),
                 Ok(val) => return Ok(val.to_string()),
             }
+        }
+
+        pub fn get_token_byte_length(cursor: usize, bytes: &[u8]) -> usize {
+            let mut len: usize = 0;
+            let mut i: usize = cursor;
+            while bytes[i] != b'\r' {
+                len += 1;
+                i += 1;
+            }
+            return len;
         }
 
         pub fn array_from_bytes(bytes: &[u8]) -> Result<RESP, RespParseError> {
@@ -72,30 +84,29 @@ pub mod resp {
 
             // get length of array in elements
             let mut cursor = 1;
-            while bytes[cursor] != b'\r' {
-                cursor += 1;
-            }
+            let arr_len = RESP::get_token_byte_length(cursor, &bytes);
 
-            let array_len = RESP::array_len_from_byte_slice(&bytes, 1, cursor)?;
+            let array_len = RESP::array_len_from_byte_slice(&bytes, 1, 1 + arr_len)?;
+
+            cursor += 1;
 
             for _ in 0..array_len {
                 // skip CRLF + $
                 cursor += 3;
 
                 // read content size
-                // TODO: There should be a way to do this directly from the binary value
-                // without parsing to string and then a number
-                let mut len = 0;
-                while bytes[cursor + len] != b'\r' {
-                    len += 1;
-                }
+                let token_length = RESP::get_token_byte_length(cursor, &bytes);
 
-                let length = RESP::array_len_from_byte_slice(&bytes, cursor, cursor + len)?;
+                println!("token width: {}", token_length);
+
+                let length = RESP::get_token_byte_length(&bytes, cursor, cursor + token_length)?;
 
                 // skip cursor to start of new content
-                cursor += len + 2;
+                cursor += token_length + 2;
 
-                let content = RESP::token_from_byte_slice(&bytes, cursor, cursor + length)?;
+                let content = RESP::token_from_byte_slice(&bytes, cursor, cursor + token_length)?;
+
+                println!("content: {}", content);
 
                 let bulk = RESP::BULK { value: content };
                 if let RESP::ARRAY { ref mut value } = arr {
