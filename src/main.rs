@@ -38,11 +38,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 // Parse the command from RESP into in-memory representation
                 let resp_array = resp::resp::RESP::array_from_bytes(&buf[..n])
-                    .expect("TODO: Error handling for RESP array creation");
+                    .expect("TODO: Error messages handling RESP array creation");
 
                 // parse in-memory RESP to Redis Command
                 let command = command::command::COMMAND::from_resp_array(&resp_array)
-                    .expect("TODO: Error handling for Command parse from RESP Array");
+                    .expect("TODO: Error messages handling for Command parse from RESP Array");
 
                 // wait for the lock on the DB to become available, then take it
                 let mut db = counter.lock().await;

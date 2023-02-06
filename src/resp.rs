@@ -12,6 +12,7 @@ pub mod resp {
     pub enum RespParseError {
         Utf8ParseError(Utf8Error),
         ParseIntError(ParseIntError),
+        InvalidRespArrayEncodingError,
     }
 
     impl RespParseError {
@@ -25,96 +26,131 @@ pub mod resp {
     }
 
     impl RESP {
-        pub fn array_len_from_byte_slice(
-            bytes: &[u8],
-            start: usize,
-            end: usize,
-        ) -> Result<usize, RespParseError> {
-            let array_len_as_utf8 = std::str::from_utf8(&bytes[start..end]);
-            let array_len_as_str = match array_len_as_utf8 {
-                Err(err) => return Err(RespParseError::from_utf8_error(err)),
-                Ok(val) => val,
-            };
-            let array_len = array_len_as_str.parse::<usize>();
-            match array_len {
-                Err(err) => {
-                    println!("{}", err);
-                    return Err(RespParseError::from_parse_int_error(err));
-                }
-                Ok(val) => return Ok(val),
-            }
-        }
-
-        pub fn token_from_byte_slice(
-            bytes: &[u8],
-            start: usize,
-            end: usize,
-        ) -> Result<String, RespParseError> {
-            let content = std::str::from_utf8(&bytes[start..end]);
-
-            match content {
-                Err(err) => return Err(RespParseError::from_utf8_error(err)),
-                Ok(val) => return Ok(val.to_string()),
-            }
-        }
-
-        pub fn get_token_byte_length(cursor: usize, bytes: &[u8]) -> usize {
-            let mut len: usize = 0;
-            let mut i: usize = cursor;
-            while bytes[i] != b'\r' {
-                len += 1;
-                i += 1;
-            }
-            return len;
-        }
-
         pub fn array_from_bytes(bytes: &[u8]) -> Result<RESP, RespParseError> {
-            // RESP Array must start with "*"
-            if bytes[0] != b'*' {
-                println!(
-                    "RESP array parse error: expected *, found: {:#?}",
-                    &bytes[0]
-                );
-            }
+            let (initial_cursor, array_len) = get_resp_array_length_from_bytes(&bytes)?;
+            let mut cursor = initial_cursor;
 
-            // Create RESP ARRAY
             let mut arr = RESP::ARRAY {
                 value: Vec::<RESP>::new(),
             };
 
-            // get length of array in elements
-            let mut cursor = 1;
-            let arr_len = RESP::get_token_byte_length(cursor, &bytes);
-
-            let array_len = RESP::array_len_from_byte_slice(&bytes, 1, 1 + arr_len)?;
-
-            cursor += 1;
-
             for _ in 0..array_len {
-                // skip CRLF + $
-                cursor += 3;
+                let (updated_cursor, bulk) = get_next_bulk_string(cursor, &bytes)?;
+                println!("bulk_string: {:?}", bulk);
+                println!("new cursor position: {}", cursor);
 
-                // read content size
-                let token_length = RESP::get_token_byte_length(cursor, &bytes);
+                cursor = updated_cursor;
 
-                println!("token width: {}", token_length);
-
-                let length = RESP::get_token_byte_length(&bytes, cursor, cursor + token_length)?;
-
-                // skip cursor to start of new content
-                cursor += token_length + 2;
-
-                let content = RESP::token_from_byte_slice(&bytes, cursor, cursor + token_length)?;
-
-                println!("content: {}", content);
-
-                let bulk = RESP::BULK { value: content };
                 if let RESP::ARRAY { ref mut value } = arr {
                     value.push(bulk);
                 }
-                cursor += length;
             }
             return Ok(arr);
         }
+    }
+
+    /**
+     * reads a byte array representing a utf8 encoded RESP array, and gets the length of the array
+     * Returns a tuple (x,y)
+     * x: the new cursor position
+     * y: the usize number of elements in this RESP array
+     */
+    fn get_resp_array_length_from_bytes(bytes: &[u8]) -> Result<(usize, usize), RespParseError> {
+        // input commands must be RESP arrays starting with the "*" code
+        if bytes[0] != b'*' {
+            return Err(RespParseError::InvalidRespArrayEncodingError);
+        }
+
+        let mut cursor: usize = 1;
+        let mut i = 1;
+        while bytes[i + 1] != b'\r' {
+            i += 1;
+        }
+
+        // parse the entire line up to the CLRF as a utf8 encoded string
+        let array_length_as_string = std::str::from_utf8(&bytes[cursor..i + 1]);
+        let array_length_as_string = match array_length_as_string {
+            Err(err) => return Err(RespParseError::from_utf8_error(err)),
+            Ok(val) => val,
+        };
+
+        // attempt to parse an integer value from the utf8 encoded string
+        let array_length: Result<usize, ParseIntError> = array_length_as_string.parse();
+        let array_length = match array_length {
+            Err(err) => return Err(RespParseError::from_parse_int_error(err)),
+            Ok(val) => val,
+        };
+
+        // skip the cursor to the end of the content
+        cursor += i;
+
+        // skip the CLRF and $
+        cursor += 3;
+
+        Ok((cursor, array_length))
+    }
+
+    /**
+     * reads the line header to get the length of the next line in bytes, then parses that line as utf-8
+     *
+     * Returns a tuple, (x,y)
+     * x: the new cursor position
+     * y: the String contents of the encoded bulk_string
+     */
+    fn get_next_bulk_string(
+        mut cursor: usize,
+        bytes: &[u8],
+    ) -> Result<(usize, RESP), RespParseError> {
+        let mut i: usize = cursor;
+        while bytes[i] != b'\r' {
+            i += 1;
+        }
+        // scan the bytes up to the next CLRF and parse them as UTF-8
+        let bulk_str_length_as_string = std::str::from_utf8(&bytes[cursor..i]);
+        let bulk_str_length_as_string = match bulk_str_length_as_string {
+            Err(err) => return Err(RespParseError::from_utf8_error(err)),
+            Ok(val) => val,
+        };
+
+        println!(
+            "bulk string length in string: {}",
+            bulk_str_length_as_string
+        );
+
+        // attempt to parse the UTF-8 encoded string as a number
+        let bulk_str_length: Result<usize, ParseIntError> = bulk_str_length_as_string.parse();
+        let bulk_str_length = match bulk_str_length {
+            Err(err) => return Err(RespParseError::ParseIntError(err)),
+            Ok(val) => val,
+        };
+
+        // move cursor to the end of the UTF-8 representing the byte-length of the bulk string
+        cursor = i;
+
+        // skip the CLRF and $
+        cursor += 2;
+
+        println!("bulk string length in usize: {}", bulk_str_length);
+
+        // attempt to parse the next n bytes after the cursor based on the run-length from the previous step
+        let bulk_str_content = std::str::from_utf8(&bytes[cursor..cursor + bulk_str_length]);
+        let bulk_str_content = match bulk_str_content {
+            Err(err) => return Err(RespParseError::Utf8ParseError(err)),
+            Ok(val) => val.to_string(),
+        };
+
+        // move cursor to the end of the bulk string content
+        cursor = cursor + bulk_str_length;
+
+        // skip CLRF and $
+        cursor += 3;
+
+        println!("bulk string content as string: {}", bulk_str_content);
+
+        let resp_bulk_str = RESP::BULK {
+            value: bulk_str_content,
+        };
+
+        Ok((cursor, resp_bulk_str))
     }
 }
