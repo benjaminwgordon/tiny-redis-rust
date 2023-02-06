@@ -101,6 +101,7 @@ pub mod resp {
         mut cursor: usize,
         bytes: &[u8],
     ) -> Result<(usize, RESP), RespParseError> {
+        // count characters until next CLRF
         let mut i: usize = cursor;
         while bytes[i] != b'\r' {
             i += 1;
@@ -112,11 +113,6 @@ pub mod resp {
             Ok(val) => val,
         };
 
-        println!(
-            "bulk string length in string: {}",
-            bulk_str_length_as_string
-        );
-
         // attempt to parse the UTF-8 encoded string as a number
         let bulk_str_length: Result<usize, ParseIntError> = bulk_str_length_as_string.parse();
         let bulk_str_length = match bulk_str_length {
@@ -127,10 +123,8 @@ pub mod resp {
         // move cursor to the end of the UTF-8 representing the byte-length of the bulk string
         cursor = i;
 
-        // skip the CLRF and $
+        // skip the RF and $
         cursor += 2;
-
-        println!("bulk string length in usize: {}", bulk_str_length);
 
         // attempt to parse the next n bytes after the cursor based on the run-length from the previous step
         let bulk_str_content = std::str::from_utf8(&bytes[cursor..cursor + bulk_str_length]);
@@ -145,8 +139,7 @@ pub mod resp {
         // skip CLRF and $
         cursor += 3;
 
-        println!("bulk string content as string: {}", bulk_str_content);
-
+        // construct an RESP BULK to hold this bulk string
         let resp_bulk_str = RESP::BULK {
             value: bulk_str_content,
         };
