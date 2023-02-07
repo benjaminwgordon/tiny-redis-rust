@@ -30,6 +30,12 @@ pub mod resp {
          * Constructs an RESP::ARRAY from a slice of [u8]
          *
          * Valid RESP encoded commands are a RESP Array containing 2-4 RESP Bulk Strings
+         *
+         * required: [GET/SET/PUB/SUB]
+         * required: [KEY]
+         * optional: [VALUE]
+         * optional: [TTL]
+         *
          */
         pub fn array_from_bytes(bytes: &[u8]) -> Result<RESP, RespParseError> {
             let (initial_cursor, array_len) = get_resp_array_length_from_bytes(&bytes)?;
