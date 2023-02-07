@@ -26,6 +26,11 @@ pub mod resp {
     }
 
     impl RESP {
+        /**
+         * Constructs an RESP::ARRAY from a slice of [u8]
+         *
+         * Valid RESP encoded commands are a RESP Array containing 2-4 RESP Bulk Strings
+         */
         pub fn array_from_bytes(bytes: &[u8]) -> Result<RESP, RespParseError> {
             let (initial_cursor, array_len) = get_resp_array_length_from_bytes(&bytes)?;
             let mut cursor = initial_cursor;
@@ -36,11 +41,7 @@ pub mod resp {
 
             for _ in 0..array_len {
                 let (updated_cursor, bulk) = get_next_bulk_string(cursor, &bytes)?;
-                println!("bulk_string: {:?}", bulk);
-                println!("new cursor position: {}", cursor);
-
                 cursor = updated_cursor;
-
                 if let RESP::ARRAY { ref mut value } = arr {
                     value.push(bulk);
                 }
